@@ -1,0 +1,20 @@
+----- Sahara -----
+
+- Compile Sahara as a kernel module.
+- Getting a potential address for the sys_call_table can be done using the
+	get_addr program.  It's source can be compiled with a standard
+	gcc call.
+- Using Sahara
+	Insert the module using the following command.
+	insmod ./sahara.ko [sct_addr=0xYYYYYYYY]
+	You can now check to see if it found and replaced sys_call_table by 
+		reading /var/log/everything.log.
+	You can then remove Sahara using the next command.
+	rmmod sahara.ko
+- Keep in mind that I do now guarentee the successful use of Sahara and that I am not
+	responsible for any damage that comes to your system as a result of Sahara.
+	It is a kernel module so it is very possible that any bug will bring your
+	system to it's knees.  Also, depending on how your kernel was built, it may
+	be impossible for you to force remove modules from your kernel.
+- Released by meth0dz under the GPLv2 License.
+
