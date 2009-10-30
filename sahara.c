@@ -10,7 +10,6 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("meth0dz");
 MODULE_DESCRIPTION("Exports sys_call_table to the kernel namespace.");
 
-
 // Must be supplied in little endian format
 static long sct_addr = 0;
 module_param(sct_addr, long, 0);
@@ -21,9 +20,9 @@ static int ioctl_handler(struct inode * inode, struct file * file, unsigned int 
 static int open_handler(struct inode * inode, struct file * file);
 static int release_handler(struct inode * inode, struct file * file);
 
-void *get_interrupt_handler(int index);
-int replace_sys_call_table(void * ptr_sct);
-void * mem_scan(void * buffer, long buffer_len, void * token, long token_length);
+static void *get_interrupt_handler(int index);
+static int replace_sys_call_table(void * ptr_sct);
+static void * mem_scan(void * buffer, long buffer_len, void * token, long token_length);
 
 typedef struct __attribute__ ((packed)) {
         uint16_t base_lo;
@@ -38,7 +37,8 @@ typedef struct __attribute__ ((packed)) {
         uint32_t base;
 } idt_ptr_t;
 
-unsigned long new_sys_call_table[357];
+
+static unsigned long new_sys_call_table[357];
 
 int init_module(void)
 {	
@@ -166,14 +166,12 @@ void apply_replacement(void * addr, void * rep_data)
 // as this could potentially make the software unusable on some systems
 void * mem_scan(void * buffer, long buffer_len, void * token, long token_len)
 {
-	int i, j;
+	int i = 0, j = 0, track = 0;
 	if (buffer && token) {
 		for (i = 0; i < buffer_len; i++, buffer++) {
-			if (*(unsigned char*)buffer == *(unsigned char*)token) {
-				for (j = 1; j < token_len; j++) 
-					if (((unsigned char*)buffer)[j] != ((unsigned char*)token)[j]) break;
-						if (j == token_len) return buffer;
-			}
+			track = *(unsigned char*)buffer == ((unsigned char*)token)[j++] ? track + 1 : 0;
+			if (!track) j = 0;
+			else if (j == token_len) return (buffer - token_len);
 		}
 	}
 	return NULL;
