@@ -1,18 +1,21 @@
 // Released and coded by meth0dz under the GPLv2 License.
-// I can be reached at meth0dz_@hotmail.com.
+// I can be reached at meth0dz_[at]hotmail.com.
 
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/moduleparam.h>
 #include <linux/fs.h>
 
+#define SYS_CALL_TABLE_ENTRIES 357
+#define UNUSED(x) x
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("meth0dz");
-MODULE_DESCRIPTION("Exports sys_call_table to the kernel namespace.");
+MODULE_DESCRIPTION("Creates a sandbox that allows users to run unreliable, unpredictable or even potentially dangeorus software on their system in a controlled environment.");
 
 // Must be supplied in little endian format
-static long sct_addr = 0;
-module_param(sct_addr, long, 0);
+static long orig_sct_addr = 0;
+module_param(orig_sct_addr, long, 0);
 
 static ssize_t read_handler(struct file * file, char __user * buffer, size_t length, loff_t * offset);
 static ssize_t write_handler(struct file * file, const char __user * buffer, size_t length, loff_t * offset);
@@ -20,9 +23,11 @@ static int ioctl_handler(struct inode * inode, struct file * file, unsigned int 
 static int open_handler(struct inode * inode, struct file * file);
 static int release_handler(struct inode * inode, struct file * file);
 
-static void *get_interrupt_handler(int index);
-static int replace_sys_call_table(void * ptr_sct);
+static void * get_interrupt_handler(int index);
+static void * get_ptr_to_sct(void * ptr_sct);
+static void apply_replacement(void * addr, void * rep_data);
 static void * mem_scan(void * buffer, long buffer_len, void * token, long token_length);
+static int create_replacement_sct(void);
 
 typedef struct __attribute__ ((packed)) {
         uint16_t base_lo;
@@ -38,11 +43,13 @@ typedef struct __attribute__ ((packed)) {
 } idt_ptr_t;
 
 
-static unsigned long new_sys_call_table[357];
+static unsigned long new_sys_call_table[SYS_CALL_TABLE_ENTRIES];
+static void * ptr_to_sct = NULL;
+static long major = 0;
+static const char * device_name = "Sahara";
 
 int init_module(void)
 {	
-	const char * device_name = "Sahara";
 	struct file_operations fops = 
 	{
 		.read = &read_handler,
@@ -51,25 +58,31 @@ int init_module(void)
 		.open = &open_handler,
 		.release = &release_handler
 	};
-	void * sys_call = get_interrupt_handler(0x80);
-	replace_sys_call_table(sys_call);
-	register_chrdev(0, device_name, &fops);
-	 
-	return 0;
+	void * sys_call_function;
+	if ((major = register_chrdev(0, device_name, &fops)) > 0) {
+		sys_call_function = get_interrupt_handler(0x80);
+		if ((ptr_to_sct = get_ptr_to_sct(sys_call_function))) {
+			if (create_replacement_sct()) {
+				return 0;
+			}
+		}
+	}
+	printk(KERN_ALERT "Saharan Vault failed to initialize properly.\n");
+	return 1;
 }
 
 
 
 void cleanup_module(void)
-{	
+{	unregister_chrdev(major, device_name);
 	return;
 }
 
 
 /*
-** This function is responsible for returning data about the current state of Sahara.  It can return 
-** information such as, is it currently in operation, or chillin, as well as a list of all intercepted 
-** calls and their parameters.
+** This function is responsible for returning data about the current state of 
+** Sahara.  It can return information such as, is it currently in operation, or
+** chillin, as well as a list of all intercepted calls and their parameters.
 */
 static ssize_t read_handler(struct file * file, char __user * buffer, size_t length, loff_t * offset)
 {
@@ -78,8 +91,9 @@ static ssize_t read_handler(struct file * file, char __user * buffer, size_t len
 }
 
 /* 
-** This function is responsible for allowing a user to put the module in and out of operation.  As well
-** as allowing the user to set the directory and userland binary that is to be controlled.
+** This function is responsible for allowing a user to put the module in and out
+** of operation.  As well as allowing the user to set the directory and userland
+** binary that is to be controlled.
 */
 static ssize_t write_handler(struct file * file, const char __user * buffer, size_t length, loff_t * offset)
 {
@@ -101,7 +115,7 @@ static int ioctl_handler(struct inode * inode, struct file * file, unsigned int 
 */
 static int open_handler(struct inode * inode, struct file * file)
 {
-
+	apply_replacement(ptr_to_sct, new_sys_call_table);
 	return 0;
 }
 
@@ -110,11 +124,11 @@ static int open_handler(struct inode * inode, struct file * file)
 */
 static int release_handler(struct inode * inode, struct file * file)
 {
-
+	apply_replacement(ptr_to_sct, (void*)orig_sct_addr);
 	return 0;
 }
 
-// By Napalm[a]Netcore2k.com under the GPL
+// By Napalm[at]Netcore2k.net under the GPL
 void *get_interrupt_handler(int index)
 {
         idt_ptr_t idtp;
@@ -127,34 +141,32 @@ void *get_interrupt_handler(int index)
         return (void *)((entry->base_hi << 16) + entry->base_lo);
 }
 
-int replace_sys_call_table(void * ptr_sys_call)
+void * get_ptr_to_sct(void * ptr_sys_call_func)
 {
 	// Remember little endian
-	void * loc, * def = "\xFF\x14\x85";
+	void * ptr_to_sct, * def = "\xFF\x14\x85";
 
 	// If the user supplied a possible address for the sys_call_table
 	// We will try to use it first
-	if (sct_addr) {
-		if (loc = mem_scan(ptr_sys_call, 0x1FF, (void*)sct_addr, 4)) {
+	if (orig_sct_addr) {
+		if ((ptr_to_sct = mem_scan(ptr_sys_call_func, 0x1FF, (void*)orig_sct_addr, 4))) {
 			printk(KERN_ALERT "Found using user supplied address!\n");
-			//apply_replacement(loc, new_sys_call_table);
-			return 0;
+			return ptr_to_sct;
 		}
 	}
 
 	// Otherwise, we will just scan through memory looking for 
 	// 0x8514ff
-	if (loc = mem_scan(ptr_sys_call, 0x1FF, def, 3)) {
+	if ((ptr_to_sct = mem_scan(ptr_sys_call_func, 0x1FF, def, 3))) {
 		printk(KERN_ALERT "Found using general memory scan!\n");
-		// In my memory, it's laid out 4 in front of the searched string
-		//apply_replacement(loc + 4, new_sys_call_table);
-		return 0;
+		ptr_to_sct += 4;
+		orig_sct_addr = (long)*(unsigned long*)ptr_to_sct;
+		return ptr_to_sct;
 	}
 	
-	return -1;
+	return (void*)0;
 }
 
-// Is endianess correct here?
 void apply_replacement(void * addr, void * rep_data)
 {
 	*(unsigned long*)addr = (unsigned long)rep_data;
@@ -176,3 +188,12 @@ void * mem_scan(void * buffer, long buffer_len, void * token, long token_len)
 	}
 	return NULL;
 }
+
+int create_replacement_sct(void)
+{
+	int i = 0;
+	for (; i < SYS_CALL_TABLE_ENTRIES; i++) 
+		((unsigned long*)new_sys_call_table)[i] = (*(unsigned long**)(ptr_to_sct))[i];	
+	return 1;
+}
+
