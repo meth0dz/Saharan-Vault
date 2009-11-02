@@ -46,7 +46,8 @@ typedef struct __attribute__ ((packed)) {
 static unsigned long new_sys_call_table[SYS_CALL_TABLE_ENTRIES];
 static void * ptr_to_sct = NULL;
 static long major = 0;
-static const char * device_name = "Sahara";
+static const char * device_name = "Sahara", jailed_process[50];
+static int busy = 0;
 
 int init_module(void)
 {	
@@ -62,9 +63,8 @@ int init_module(void)
 	if ((major = register_chrdev(0, device_name, &fops)) > 0) {
 		sys_call_function = get_interrupt_handler(0x80);
 		if ((ptr_to_sct = get_ptr_to_sct(sys_call_function))) {
-			if (create_replacement_sct()) {
+			if (create_replacement_sct()) 
 				return 0;
-			}
 		}
 	}
 	printk(KERN_ALERT "Saharan Vault failed to initialize properly.\n");
@@ -74,7 +74,8 @@ int init_module(void)
 
 
 void cleanup_module(void)
-{	unregister_chrdev(major, device_name);
+{	
+	unregister_chrdev(major, device_name);
 	return;
 }
 
@@ -115,8 +116,11 @@ static int ioctl_handler(struct inode * inode, struct file * file, unsigned int 
 */
 static int open_handler(struct inode * inode, struct file * file)
 {
-	apply_replacement(ptr_to_sct, new_sys_call_table);
-	return 0;
+	if (!busy) {
+		busy = 1;
+		apply_replacement(ptr_to_sct, new_sys_call_table);
+	}
+	return EBUSY;
 }
 
 /*
@@ -124,7 +128,9 @@ static int open_handler(struct inode * inode, struct file * file)
 */
 static int release_handler(struct inode * inode, struct file * file)
 {
-	apply_replacement(ptr_to_sct, (void*)orig_sct_addr);
+	if (busy)
+		apply_replacement(ptr_to_sct, (void*)orig_sct_addr);
+	busy = 0;
 	return 0;
 }
 

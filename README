@@ -16,5 +16,9 @@
 	It is a kernel module so it is very possible that any bug will bring your
 	system to it's knees.  Also, depending on how your kernel was built, it may
 	be impossible for you to force remove modules from your kernel.
+- It is dangerous to pass an address to orig_sct_addr if you are not __very sure__
+	that this is in fact the correct address.  This is because the driver
+	is attempting to change data in the kernel, and changing the wrong value
+	has the possibility of crashing your system.
 - Released by meth0dz under the GPLv2 License.
 
